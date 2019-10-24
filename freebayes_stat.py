@@ -6,10 +6,10 @@ import re
 chromosomes = ['chr01','chr02','chr03','chr04','chr05','chr06','chr07','chr08','chr09','chr10','chr11','chr12']
 coordinates = [43270923,35937250,36413819,35502694,29958434,31248787,29697621,28443022,23012720,23207287,29021106,27531856]
 reference = dict(zip(chromosomes,coordinates))
-bin_width = 100000
+bin_width = 1000000
 stat_results = {}
 
-def make_bin_width(reference,bin_width=100000):
+def make_bin_width(reference,bin_width=1000000):
     bin_widths = {}
     for chromosome in reference.keys():
         coordinate = reference[chromosome]
@@ -27,7 +27,7 @@ bin_widths = make_bin_width(reference,bin_width=100000)
 
 def print_head(outdir):
     head_file = outdir + '/header'
-    out_head = ['TYPE','CHR','SITE','HOMO','HYBRID','Homo_info','Hybrid_info']
+    out_head = ['TYPE','CHR','SITE','HOMOREF','HOMOALT','HYBRID','Homoref_info','Homoalt_info','Hybrid_info']
     f_head = open(head_file,'w')
     f_head.writelines('\t'.join(out_head) + '\n')
     f_head.close()
@@ -45,7 +45,8 @@ def traverse_dir(input_dir):
 def gzip_open_files(files):
     f_handles = []
     for file in files:
-        f = gzip.open(file,'rb')
+        #f = gzip.open(file,'rb')
+        f = open(file,'r')
         f_handles.append(f)   
     return f_handles
 
@@ -72,7 +73,8 @@ def read_files_in_bathes(f_handles,outdir):
         headers = []
         for handle in f_handles:
             while(1):
-                line = handle.readline().decode().replace('\n','')
+                #line = handle.readline().decode().replace('\n','')
+                line = handle.readline().replace('\n','')
                 flag = header_or_record(line)
                 if flag == 1:
                     headers.append(line.split('\t'))
@@ -80,51 +82,30 @@ def read_files_in_bathes(f_handles,outdir):
         return headers
 
     def site_pass_or_not(info):
-        pass_flag = 1    
-        def parse_info():
-            info_dict = {}
-            items = info.split(';')
-            for item in items:
-                _key,_value = item.split('=')
-                info_dict[_key] = _value
-            return info_dict
-        info_dict = parse_info(info)
-        ## variance filtering
-        if 'QD' in info_dict:
-            if info_dict['QD'] < 0:
-                pass_flag = 0
-        if 'FS' in info_dict:
-            if info_dict['FS'] < 0:
-                pass_flag = 0
-        if 'SOR' in info_dict:
-            if info_dict['SOR'] < 0:
-                pass_flag = 0
-    
+        pass_flag = 1
         return pass_flag
 
     def get_info(ref,alt,info):
+        ## for freebayes vcf
         alt_ad_dep = []
-        mutant = 'homo'
+        mutant = 'hybrid'
         mtype = 'indel'
-        gt,ad,dep = info.split(':')[0:3]
+        gt,dep,ad = info.split(':')[0:3]
+        ads = ad.split(',')
+        ads.pop(0)
+        alts = alt.split(',')
+
         if '1/1' in gt:
-            if len(ref)==1 and len(alt)==1:
+            mutant = 'homoalt'
+        elif '0/0' in gt:
+            mutant = 'homoref'
+        
+        for i in range(0,len(ads)):
+            this_ad = ads[i]
+            this_alt = alts[i]
+            if len(ref)==1 and len(this_alt)==1:
                 mtype = 'snp'
-            alt_ad_dep.append([mtype,mutant,alt,dep,ad.split(',')[1]])
-        elif '0/1' in gt:
-            mutant = 'hybrid'
-            if len(ref)==1 and len(alt)==1:
-                mtype = 'snp'
-            alt_ad_dep.append([mtype,mutant,alt,dep,ad.split(',')[1]])
-        elif '1/2' in gt:
-            alt1,alt2 = alt.split(',')
-            ad1,ad2 = ad.split(',')[1:3]
-            if len(ref)==1 and len(alt1)==1:
-                mtype1 = 'snp'
-                alt_ad_dep.append([mtype1,mutant,alt1,dep,ad1])
-            if len(ref)==1 and len(alt2)==1:
-                mtype2 = 'snp'
-                alt_ad_dep.append([mtype2,mutant,alt2,dep,ad2])
+            alt_ad_dep.append([mtype,mutant,this_alt,dep,this_ad])
         return alt_ad_dep
 
     def travers_handles(chromosome,start,end,bin_width):
@@ -137,7 +118,8 @@ def read_files_in_bathes(f_handles,outdir):
             handle = f_handles[i]
             header = headers[i]
             while(1):
-                line = handle.readline().decode().replace('\n','')
+                #line = handle.readline().decode().replace('\n','')
+                line = handle.readline().replace('\n','')
                 if not line:
                     break
                 this_flag = header_or_record(line)
@@ -146,6 +128,8 @@ def read_files_in_bathes(f_handles,outdir):
                     if site_pass_or_not(temp[7]):
                         if (temp[0]==chromosome) and (int(temp[1])>=start) and (int(temp[1])<end):                   
                             for j in range(9,len(temp)):
+                                if temp[j] == '.':
+                                    continue
                                 samp_id = header[j]
                                 alt_ad_dep = get_info(temp[3],temp[4],temp[j])
                                 for mtype,mutant,alt,dep,ad in alt_ad_dep:
@@ -165,6 +149,8 @@ def read_files_in_bathes(f_handles,outdir):
                             if not new_tag in data[temp[0]].keys():
                                 data[temp[0]][new_tag] = {}
                             for j in range(9,len(temp)):
+                                if temp[j] == '.':
+                                    continue
                                 samp_id = header[j]
                                 alt_ad_dep = get_info(temp[3],temp[4],temp[j])
                                 for mtype,mutant,alt,dep,ad in alt_ad_dep:
@@ -186,17 +172,21 @@ def read_files_in_bathes(f_handles,outdir):
             fname = outdir + '/' + chromosome + '.'+ tag +'.' + mtype + '.stat.tsv'
             f_out = open(fname,'w')
             for site in batch_data[mtype].keys():
-                homo_info, hybrid_info = ('-','-')
-                homo_num, hybrid_num = (0,0)
-                if 'homo' in batch_data[mtype][site].keys():
-                    homo = sorted(batch_data[mtype][site]['homo'].keys())
-                    homo_info = ';'.join(homo)
-                    homo_num = len(homo)
+                homoref_info, homoalt_info, hybrid_info = ('-','-','-')
+                homoref_num, homoalt_num, hybrid_num = (0,0,0)
+                if 'homoref' in batch_data[mtype][site].keys():
+                    homoref = sorted(batch_data[mtype][site]['homoref'].keys())
+                    homoref_info = ';'.join(homoref)
+                    homoref_num = len(homoref)
+                if 'homoalt' in batch_data[mtype][site].keys():
+                    homoalt = sorted(batch_data[mtype][site]['homoalt'].keys())
+                    homoalt_info = ';'.join(homoalt)
+                    homoalt_num = len(homoalt)
                 if 'hybrid' in batch_data[mtype][site].keys():
                     hybrid = sorted(batch_data[mtype][site]['hybrid'].keys())
                     hybrid_info = ';'.join(hybrid)
                     hybrid_num = len(hybrid)
-                f_out.writelines('\t'.join([mtype,chromosome,site,str(homo_num),str(hybrid_num),homo_info,hybrid_info]) + '\n')
+                f_out.writelines('\t'.join([mtype,chromosome,site,str(homoref_num),str(homoalt_num),str(hybrid_num),homoref_info,homoalt_info,hybrid_info]) + '\n')
             f_out.close()
             save_file_names(chromosome,mtype,fname)
     
@@ -214,17 +204,21 @@ def read_files_in_bathes(f_handles,outdir):
                     fname = outdir + '/' + chrom + '.' + tag + '.' + mtype + '.stat.tsv'
                     f_out = open(fname,'w')
                     for site in list(data[chrom][tag][mtype].keys()):
-                        homo_info, hybrid_info = ('-','-')
-                        homo_num, hybrid_num = (0,0)
-                        if 'homo' in data[chrom][tag][mtype][site].keys():
-                            homo = sorted(data[chrom][tag][mtype][site]['homo'].keys())
-                            homo_info = ';'.join(homo)
-                            homo_num = len(homo)
+                        homoref_info, homoalt_info, hybrid_info = ('-','-','-')
+                        homoref_num, homoalt_num, hybrid_num = (0,0,0)
+                        if 'homoref' in data[chrom][tag][mtype][site].keys():
+                            homoref = sorted(data[chrom][tag][mtype][site]['homoref'].keys())
+                            homoref_info = ';'.join(homoref)
+                            homoref_num = len(homoref)
+                        if 'homoalt' in data[chrom][tag][mtype][site].keys():
+                            homoalt = sorted(data[chrom][tag][mtype][site]['homoalt'].keys())
+                            homoalt_info = ';'.join(homoalt)
+                            homoalt_num = len(homoalt)
                         if 'hybrid' in data[chrom][tag][mtype][site].keys():
                             hybrid = sorted(data[chrom][tag][mtype][site]['hybrid'].keys())
                             hybrid_info = ';'.join(hybrid)
                             hybrid_num = len(hybrid)
-                        f_out.writelines('\t'.join([mtype,chrom,site,str(homo_num),str(hybrid_num),homo_info,hybrid_info]) + '\n')
+                        f_out.writelines('\t'.join([mtype,chrom,site,str(homoref_num),str(homoalt_num),str(hybrid_num),homoref_info,homoalt_info,hybrid_info]) + '\n')
                     f_out.close()
                     save_file_names(chrom,mtype,fname)
                 del data[chrom][tag]
