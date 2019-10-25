@@ -1,3 +1,8 @@
+'''
+This Script is used for variance statistics of GATK VCFs  (step 1)
+author: Li WENHUI, jemimalwh@gmail.com, liwenhui@genomics.cn
+date: 2019-10-25
+'''
 import os, sys
 import gzip
 import re
@@ -88,7 +93,8 @@ def read_files_in_bathes(f_handles,outdir):
                 _key,_value = item.split('=')
                 info_dict[_key] = _value
             return info_dict
-        info_dict = parse_info(info)
+
+        info_dict = parse_info()
         ## variance filtering
         if 'QD' in info_dict:
             if info_dict['QD'] < 0:

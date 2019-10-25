@@ -1,3 +1,8 @@
+'''
+This Script is used for variance statistics of freebayes VCFs
+author: Li WENHUI, jemimalwh@gmail.com, liwenhui@genomics.cn
+date: 2019-10-25
+'''
 import os, sys
 import gzip
 import re
